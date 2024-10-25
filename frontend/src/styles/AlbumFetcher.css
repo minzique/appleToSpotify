@@ -1,0 +1,7 @@
+.album-fetcher {
+    margin-bottom: 20px;
+}
+
+.album-fetcher .form-control {
+    width: calc(100% - 20px);
+}
