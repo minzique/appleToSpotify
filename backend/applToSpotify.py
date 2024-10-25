@@ -7,6 +7,8 @@ import requests
 from bs4 import BeautifulSoup
 from base64 import b64encode
 from urllib.parse import urlencode
+from dotenv import load_dotenv
+
 
 class Spotify:
     def __init__(self, token = None) -> None:
@@ -27,7 +29,7 @@ class Spotify:
             raise Exception('Error occurred during API request ')
         return res.json()
         
-    def create_playlist(self, name, appl_playlist_id, img_url = None, des=None, clear_existing = True):
+    def create_playlist(self, name, appl_playlist_id, img_url = None, des=None, purge_existing = False):
         '''
         Returns -   spotify playlist_id
                     Creates a new one if no matching playlist is found
@@ -41,7 +43,7 @@ class Spotify:
                 id = next((x['spot'] for x in data if x['appl'] == appl_playlist_id), None)
                 if id:
                     print(f'Playlist already exported to spotify - id {appl_playlist_id} found in playlists.json')
-                    if clear_existing == True or str.upper(input('Purge existing tracks from playlist? [Y/N]: ')) == 'Y' : self.clear_playlist(id)
+                    if purge_existing == True or str.upper(input('Purge existing tracks from playlist? [Y/N]: ')) == 'Y' : self.clear_playlist(id)
                     return id
         except IOError: pass
             
@@ -94,29 +96,36 @@ class Spotify:
             raise Exception('Unable to update playlist artwork')
         
     def clear_playlist(self, playlist_id):
-        print(f'Purging all existing tracks from playlist -  {playlist_id}')
-        data = self.request(f'/playlists/{playlist_id}/tracks')['items']    
-        track_ids = [{'uri': t['track']['uri']} for t in data]
-        if len(track_ids) == 0: 
-            print('Playlist empty')
+        """Remove all tracks from a Spotify playlist."""
+        # Get the list of tracks in the playlist
+        tracks_data = self.request(f'/playlists/{playlist_id}/tracks')['items']
+
+        # If the playlist is empty, return immediately
+        if not tracks_data:
             return
-        for i in range(0, len(track_ids), 100):
-            res = self.session.delete(f'https://api.spotify.com/v1/playlists/{playlist_id}/tracks', json = {'tracks': track_ids[i:len(track_ids) - i]})
-        if not res.ok:
-            raise Exception('Unable to clear playlist')
 
+        # Create a list of track URIs
+        track_uris = [{'uri': track['track']['uri']} for track in tracks_data]
 
+        # Remove the tracks from the playlist in chunks of 100
+        for i in range(0, len(track_uris), 100):
+            chunk = track_uris[i:i + 100]
+            response = self.session.delete(
+                f'https://api.spotify.com/v1/playlists/{playlist_id}/tracks',
+                json={'tracks': chunk}
+            )
+            if not response.ok:
+                raise Exception('Unable to clear playlist')
             
         
-        
-        
-def get_songs(id):
+def get_songs_from_apple(id):
     # pl.9a964a33c1484aec8fdb0cac3e7771ed
     url = 'https://music.apple.com/us/playlist/' + id
     res = requests.get(url)
     if not res.ok:
         raise Exception('Unable to fetch playlist')
-    d = BeautifulSoup(res.text, "html.parser").find(id='serialized-server-data').contents
+    d = BeautifulSoup(res.content.decode('utf-8'), "html.parser").find(id='serialized-server-data').contents
+ 
     if len(d) < 1:
         raise Exception('Unable to find playlist data')
     data = json.loads(d[0])[0]['data']['sections']
@@ -130,26 +139,23 @@ def get_songs(id):
         'artwork_url' : art['url'].format(w = '300', h = '300', f = 'jpeg'),
         'tracks' : []        
     }
-
     for track in song_data:
         song = {
-            'title' : track['title'],
-            'artists': []
+            'title': track['title'],
+            'artist': track['artistName'],           
+            'arwork': track['artwork']['dictionary']['url'].format(w = '300', h = '300', f = 'jpeg')
         }
-        for a in track['subtitleLinks']:
-            if a['segue']['destination']['contentDescriptor']['kind'] == 'artist':
-                song['artists'].append(a['title'])
+        if song['artist'] == "Olivia Rodrigo":
+            print('Song:', song['title'])
+
         album['tracks'].append(song)
         # print(f'{song["title"]:35} - {", ".join(x for x in song["artists"])}')
-
+    
     return album
-
-def get_album_data(id):
-    pass
 
 def main(id):    
     spotify = Spotify()
-    playlist = get_songs(id)
+    playlist = get_songs_from_apple(id)
     
     uris = []
     spotify_id = spotify.create_playlist(playlist['name'] + ' - Apple Music', appl_playlist_id = id, img_url=playlist['artwork_url'])
@@ -173,12 +179,14 @@ def main(id):
         spotify.add_to_playlist(spotify_id, uri)
         
         # break
-    
+
+        
     
 if __name__ == '__main__':
     import sys, os
     if len(sys.argv) <= 1:
         sys.exit()
     id = sys.argv[1]
-    main(id)
+    # main(id)
+    # get_auth_token()
   
